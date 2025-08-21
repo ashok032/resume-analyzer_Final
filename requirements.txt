@@ -3,6 +3,7 @@ pandas
 pdfplumber
 python-docx
 spacy==3.7.4
+numpy==1.26.4
 supabase
 postgrest
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1.tar.gz
