@@ -139,7 +139,7 @@ def match_resume_to_job(resume_keywords, job_skills):
 def send_email(to_email, subject, body):
     """Sends a simple plain text email."""
     if not to_email or to_email == "Not found":
-        st.error("❌ Email is blank, cannot send email.")
+        st.error("Email is blank, cannot send email.")
         return False
         
     msg = MIMEMultipart()
@@ -152,10 +152,10 @@ def send_email(to_email, subject, body):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             server.send_message(msg)
-        st.success(f"📨 Email sent to {to_email}")
+        st.success(f"Email sent to {to_email}")
         return True
     except Exception as e:
-        st.error(f"❌ Failed to send email: {e}")
+        st.error(f"Failed to send email: {e}")
         return False
 
 # -------------------- Supabase Data Functions --------------------
@@ -188,11 +188,11 @@ def load_all_applications():
 # -------------------- UI & Logic --------------------
 
 def login_register_ui():
-    st.title("🔐 AI Resume Analyzer")
-    tabs = st.tabs(["🔑 Login", "🆕 Register"])
+    st.title("AI Resume Analyzer")
+    tabs = st.tabs(["Login", "Register"])
     with tabs[0]:
-        email = st.text_input("👤 Email")
-        password = st.text_input("🔑 Password", type="password")
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
         if st.button("Login"):
             hashed = hash_password(password)
             user = supabase.table('users').select('*').eq('email', email).eq('password_hash', hashed).execute()
@@ -201,9 +201,39 @@ def login_register_ui():
                 st.success("Login successful!"); st.rerun()
             else:
                 st.error("Invalid credentials.")
+        
+        # --- NEW: Password Reset Functionality ---
+        with st.expander("Forgot Password?"):
+            with st.form("reset_password_form", clear_on_submit=False):
+                st.write("Reset your password by entering your email and a new password.")
+                email_reset = st.text_input("Enter your registered Email", key="email_reset")
+                new_password_reset = st.text_input("Enter New Password", type="password", key="new_pass_reset")
+                confirm_password_reset = st.text_input("Confirm New Password", type="password", key="confirm_pass_reset")
+                
+                submitted_reset = st.form_submit_button("Reset Password")
+                
+                if submitted_reset:
+                    if not email_reset or not new_password_reset or not confirm_password_reset:
+                        st.warning("Please fill in all fields.")
+                    elif new_password_reset != confirm_password_reset:
+                        st.error("Passwords do not match. Please try again.")
+                    else:
+                        # Check if user exists
+                        user_check = supabase.table('users').select('id').eq('email', email_reset).execute()
+                        if not user_check.data:
+                            st.error("This email is not registered. Please check the email address.")
+                        else:
+                            try:
+                                # Hash the new password and update the database
+                                new_hashed_password = hash_password(new_password_reset)
+                                supabase.table('users').update({'password_hash': new_hashed_password}).eq('email', email_reset).execute()
+                                st.success("Password reset successfully! You can now log in with your new password.")
+                            except Exception as e:
+                                st.error(f"An error occurred while resetting the password: {e}")
+
     with tabs[1]:
-        new_email = st.text_input("👤 Email", key="reg_user")
-        new_password = st.text_input("🔑 Password", type="password", key="reg_pass")
+        new_email = st.text_input("Email", key="reg_user")
+        new_password = st.text_input("Password", type="password", key="reg_pass")
         role = st.selectbox("Select Role", ["User", "HR"], key="reg_role")
         if st.button("Register"):
             if supabase.table('users').select('id').eq('email', new_email).execute().data:
@@ -216,10 +246,10 @@ def login_register_ui():
                     st.error("Registration failed.")
 
 def user_view():
-    st.header("👤 Candidate Dashboard")
+    st.header("Candidate Dashboard")
     df_all = load_all_applications()
     my_apps = df_all[df_all["logged_in_username"] == st.session_state["username"]]
-    st.subheader("📜 My Applications")
+    st.subheader("My Applications")
     
     if not my_apps.empty:
         st.dataframe(my_apps[['company', 'role', 'match_score', 'current_phase', 'status']])
@@ -340,7 +370,7 @@ def hr_view():
             duration_mins = c3.number_input("Duration (mins)", 15, 240, 30, 15)
             meet_link = st.text_input("Google Meet Link", "https://meet.google.com/...")
             
-            if st.form_submit_button("📅 Send Interview Invite"):
+            if st.form_submit_button("Send Interview Invite"):
                 start_dt = datetime.combine(meeting_date, meeting_time)
                 email_body = f"""
 Dear {candidate['name']},
@@ -377,7 +407,7 @@ The HR Team
                 elif "Final" in current_phase:
                     update_data = {"status": "Selected", "phase": "Selected"}
                     offer_body = f"Dear {candidate['name']},\n\nCongratulations! You have been selected for the {candidate['role']} position at {candidate['company']}.\n\nWe are excited to welcome you to the team.\n\nBest regards,\nThe HR Team"
-                    send_email(candidate["email"], "🎉 Job Offer", offer_body)
+                    send_email(candidate["email"], "Job Offer", offer_body)
             
             if update_data:
                 supabase.table('applications').update(update_data).eq('id', app_id).execute()
@@ -389,8 +419,8 @@ def main():
         login_register_ui()
     else:
         with st.sidebar:
-            st.markdown(f"👤 Logged in as `{st.session_state['username']}`")
-            if st.button("🚪 Logout", key="logout_btn"):
+            st.markdown(f"Logged in as `{st.session_state['username']}`")
+            if st.button("Logout", key="logout_btn"):
                 st.session_state.clear(); st.rerun()
         
         if st.session_state["role"] == "User": user_view()
