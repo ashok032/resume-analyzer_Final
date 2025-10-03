@@ -94,38 +94,61 @@ def extract_phone_from_text(text):
     
 # Keyword matching functions
 def extract_keywords(text):
-    """Extracts both single-word and multi-word skills from text."""
+    """
+    Extracts skills from text using a more universal, pattern-based approach.
+    This function can identify a wide range of skills without a predefined list.
+    """
+    # Load the original text for special pattern matching, preserving case
+    original_text = text
+    # Process the text with spaCy in lower case for general linguistic analysis
     doc = nlp(text.lower())
-    matcher = Matcher(nlp.vocab)
-    
-    patterns = {
-        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
-        "unit testing": [[{"LOWER": "unit"}, {"LOWER": "testing"}]], "data visualization": [[{"LOWER": "data"}, {"LOWER": "visualization"}]],
-        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], "deep learning": [[{"LOWER": "deep"}, {"LOWER": "learning"}]],
-        "computer vision": [[{"LOWER": "computer"}, {"LOWER": "vision"}]], "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
-        "microservices": [[{"LOWER": "microservices"}]], "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]],
-        "ci/cd": [[{"LOWER": "ci"}, {"LOWER": "/"}, {"LOWER": "cd"}]], "google cloud": [[{"LOWER": "google"}, {"LOWER": "cloud"}]],
-        "adobe xd": [[{"LOWER": "adobe"}, {"LOWER": "xd"}]], "power bi": [[{"LOWER": "power"}, {"LOWER": "bi"}]],
-        "sql developer": [[{"LOWER": "sql"}, {"LOWER": "developer"}]]
+
+    # A set of common non-skill words to filter out from results
+    IGNORE_WORDS = {
+        'experience', 'skill', 'skills', 'profile', 'summary', 'education',
+        'project', 'projects', 'internship', 'internships', 'work', 'role',
+        'contact', 'email', 'phone', 'address', 'linkedin', 'github', 'name',
+        'date', 'month', 'year', 'company', 'university', 'college', 'gpa',
+        'description', 'responsibility', 'responsibilities', 'objective'
     }
 
-    for skill, pattern in patterns.items():
-        matcher.add(skill, pattern)
+    keywords = set()
 
-    keywords, matched_tokens = set(), set()
-    matches = matcher(doc)
-    
-    for match_id, start, end in matches:
-        span = doc[start:end]
-        keywords.add(span.text)
-        for i in range(start, end): matched_tokens.add(i)
+    # --- Step 1: Extract Noun Chunks ---
+    # This is highly effective for multi-word skills like "data science" or "machine learning"
+    for chunk in doc.noun_chunks:
+        clean_chunk = chunk.lemma_.strip()
+        tokens_in_chunk = clean_chunk.split()
+        # Add the chunk if it's meaningful and doesn't contain ignored words
+        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
+            keywords.add(clean_chunk)
 
+    # --- Step 2: Extract Single Proper Nouns and Nouns ---
+    # This captures single-word skills like "Python", "Java", "Docker", "analysis", etc.
     for token in doc:
-        if token.i not in matched_tokens and token.pos_ in ('NOUN', 'PROPN', 'ADJ') and not token.is_stop and len(token.text) > 2:
-            keywords.add(token.lemma_)
-            
-    if 'core java' in keywords: keywords.add('java')
-    return list(keywords)
+        # Check if the token is a proper noun or noun, and is not a stop word or ignored word
+        if token.pos_ in ('PROPN', 'NOUN') and not token.is_stop:
+            lemma = token.lemma_.strip()
+            if len(lemma) > 1 and lemma not in IGNORE_WORDS:
+                keywords.add(lemma)
+
+    # --- Step 3: Use Regular Expressions for Specific Formats ---
+    # This finds skills that spaCy might miss, like C++, C#, .NET, or anything.js
+    special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b|\b\w+\.js\b', original_text, re.IGNORECASE)
+    for skill in special_formats:
+        keywords.add(skill.lower())
+
+    # --- Final Cleanup ---
+    # Remove any keywords that are substrings of other found keywords for cleaner results.
+    # For example, if "spring boot" is found, "spring" will be removed.
+    final_keywords = list(keywords)
+    to_remove = set()
+    for skill1 in final_keywords:
+        for skill2 in final_keywords:
+            if skill1 != skill2 and skill1 in skill2:
+                to_remove.add(skill1)
+
+    return [skill for skill in final_keywords if skill not in to_remove]
 
 
 def match_resume_to_job(resume_keywords, job_skills):
