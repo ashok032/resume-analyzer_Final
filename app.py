@@ -55,53 +55,91 @@ def extract_text_from_docx(file):
     return "\n".join(p.text for p in doc.paragraphs)
 
 def extract_name(text):
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    ignore = ["contact", "email", "phone", "address", "linkedin", "resume", "objective", "skills", "education", "experience", "profile", "summary", "internships", "projects"]
+    """
+    Extracts the name from the resume text using a multi-layered, robust approach.
+    This version is designed to be more accurate across different resume formats.
+    """
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    potential_name_lines = []
-    for line in lines[:5]:
-        if not any(k in line.lower() for k in ignore) and not re.search(r'[\d@/(),]', line):
-            potential_name_lines.append(line)
+    # Keywords that typically signal the end of personal info and the start of a new section
+    stop_keywords = {
+        'objective', 'summary', 'education', 'experience', 
+        'skills', 'projects', 'certifications', 'contact', 
+        'email', 'phone', 'linkedin', 'profile'
+    }
+    
+    # Keywords to explicitly ignore in a potential name line
+    ignore_keywords = ['@', 'resume', 'curriculum']
 
-    if potential_name_lines:
-        line1 = potential_name_lines[0]
-        if line1.replace(" ", "").isalpha() and 2 <= len(line1.split()) <= 4:
-            return line1.title()
+    # --- Step 1: Look for an ALL CAPS name at the top of the resume ---
+    name_lines = []
+    for i in range(min(10, len(lines))): # Limit search to the top 10 lines
+        line = lines[i]
+        clean_line = line.lower()
 
-        if len(potential_name_lines) > 1:
-            line2 = potential_name_lines[1]
-            if len(line1.split()) == 1 and len(line2.split()) == 1 and line1.isalpha() and line2.isalpha():
-                return f"{line1.title()} {line2.title()}"
+        # If we hit a section header, stop looking for the name
+        if any(stop_word in clean_line for stop_word in stop_keywords):
+            break
 
-    doc = nlp("\n".join(lines[:10]))
+        if any(ignore_word in clean_line for ignore_word in ignore_keywords):
+            continue
+
+        # A strong candidate for a name is in all caps, consists of 1-3 words, 
+        # and contains only letters.
+        words = line.split()
+        if 1 <= len(words) <= 3 and all(word.isupper() and word.isalpha() for word in words):
+            name_lines.append(line)
+
+    if 1 <= len(name_lines) <= 2:
+        return " ".join(name_lines).title()
+
+    # --- Step 2: Fallback to spaCy's Named Entity Recognition (NER) ---
+    doc = nlp(text[:500]) 
+    # Keywords to filter out common location-based misinterpretations by the NER model.
+    location_keywords = {'pradesh', 'nagar', 'street', 'road', 'district', 'state', 'city', 'country', 'india'}
+
     for ent in doc.ents:
-        if ent.label_ == "PERSON":
+        if ent.label_ == "PERSON" and 1 <= len(ent.text.split()) <= 4:
+            # Check to ensure it's not grabbing a section title by mistake
+            if ent.text.lower() in stop_keywords:
+                continue
+
+            # ADDED: Check if the entity text contains any location-specific keywords.
+            # This prevents addresses from being mistaken for names.
+            if any(loc_word in ent.text.lower().split() for loc_word in location_keywords):
+                continue
+
             return ent.text.title()
-            
-    if potential_name_lines:
-        return potential_name_lines[0].title()
+
+    # --- Step 3: Fallback to the first line as a last resort ---
+    if lines:
+        first_line = lines[0].strip().title()
+        # A final check to avoid returning something that is clearly not a name
+        if len(first_line.split()) <= 4:
+            return first_line
         
-    return "Not found"
+    return "N/A"
 
+def extract_email(text):
+    """Extracts email from text using regex."""
+    match = re.search(r'[\w\.-]+@[\w\.-]+', text)
+    return match.group(0) if match else "Not found"
 
-def extract_email_from_text(text):
-    m = re.search(r'[\w\.-]+@[\w\.-]+', text)
-    return m.group(0) if m else "Not found"
-
-def extract_phone_from_text(text):
-    m = re.search(r'(\+?\d{1,3}[\s\-]?)?(\(?\d{2,5}\)?[\s\-]?)?\d{3,5}[\s\-]?\d{3,5}', text)
-    return m.group(0) if m else "Not found"
+def extract_phone(text):
+    """Extracts phone number from text using a more flexible regex."""
+    match = re.search(r'(\+?\d{1,3}[\s\-]?)?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}', text)
+    return match.group(0) if match else "Not found"
     
 # Keyword matching functions
 def extract_keywords(text):
     """
-    Extracts skills from text using a more universal, pattern-based approach.
-    This function can identify a wide range of skills without a predefined list.
+    Extracts skills using a hybrid approach for better balance of precision and flexibility.
     """
-    # Load the original text for special pattern matching, preserving case
     original_text = text
-    # Process the text with spaCy in lower case for general linguistic analysis
     doc = nlp(text.lower())
+    matcher = Matcher(nlp.vocab)
+    keywords = set()
+    matched_tokens = set()
 
     # A set of common non-skill words to filter out from results
     IGNORE_WORDS = {
@@ -109,47 +147,54 @@ def extract_keywords(text):
         'project', 'projects', 'internship', 'internships', 'work', 'role',
         'contact', 'email', 'phone', 'address', 'linkedin', 'github', 'name',
         'date', 'month', 'year', 'company', 'university', 'college', 'gpa',
-        'description', 'responsibility', 'responsibilities', 'objective'
+        'description', 'responsibility', 'responsibilities', 'objective', 'team'
     }
 
-    keywords = set()
+    # --- Step 1: High-Precision Matcher for common, unambiguous skills ---
+    patterns = {
+        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
+        "unit testing": [[{"LOWER": "unit"}, {"LOWER": "testing"}]], "data visualization": [[{"LOWER": "data"}, {"LOWER": "visualization"}]],
+        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], "deep learning": [[{"LOWER": "deep"}, {"LOWER": "learning"}]],
+        "computer vision": [[{"LOWER": "computer"}, {"LOWER": "vision"}]], "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
+        "microservices": [[{"LOWER": "microservices"}]], "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]],
+        "ci/cd": [[{"LOWER": "ci"}, {"LOWER": "/"}, {"LOWER": "cd"}]], "google cloud": [[{"LOWER": "google"}, {"LOWER": "cloud"}]],
+        "adobe xd": [[{"LOWER": "adobe"}, {"LOWER": "xd"}]], "power bi": [[{"LOWER": "power"}, {"LOWER": "bi"}]],
+        "sql developer": [[{"LOWER": "sql"}, {"LOWER": "developer"}]]
+    }
 
-    # --- Step 1: Extract Noun Chunks ---
-    # This is highly effective for multi-word skills like "data science" or "machine learning"
+    for skill, pattern in patterns.items():
+        matcher.add(skill, pattern)
+
+    matches = matcher(doc)
+    for match_id, start, end in matches:
+        span = doc[start:end]
+        keywords.add(span.text)
+        if span.text == "core java":
+            keywords.add("java")
+        for i in range(start, end):
+            matched_tokens.add(i)
+
+    # --- Step 2: General Noun Chunk Extraction for other potential skills ---
     for chunk in doc.noun_chunks:
-        clean_chunk = chunk.lemma_.strip()
-        tokens_in_chunk = clean_chunk.split()
-        # Add the chunk if it's meaningful and doesn't contain ignored words
-        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
-            keywords.add(clean_chunk)
+        if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
+            clean_chunk = chunk.lemma_.strip()
+            tokens_in_chunk = clean_chunk.split()
+            if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
+                keywords.add(clean_chunk)
 
-    # --- Step 2: Extract Single Proper Nouns and Nouns ---
-    # This captures single-word skills like "Python", "Java", "Docker", "analysis", etc.
+    # --- Step 3: Extract Single-Word PROPN and NOUN skills ---
     for token in doc:
-        # Check if the token is a proper noun or noun, and is not a stop word or ignored word
-        if token.pos_ in ('PROPN', 'NOUN') and not token.is_stop:
+        if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
             lemma = token.lemma_.strip()
-            if len(lemma) > 1 and lemma not in IGNORE_WORDS:
+            if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
-
-    # --- Step 3: Use Regular Expressions for Specific Formats ---
-    # This finds skills that spaCy might miss, like C++, C#, .NET, or anything.js
-    special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b|\b\w+\.js\b', original_text, re.IGNORECASE)
+                
+    # --- Step 4: Use Regular Expressions for Specific Formats ---
+    special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b', original_text)
     for skill in special_formats:
         keywords.add(skill.lower())
 
-    # --- Final Cleanup ---
-    # Remove any keywords that are substrings of other found keywords for cleaner results.
-    # For example, if "spring boot" is found, "spring" will be removed.
-    final_keywords = list(keywords)
-    to_remove = set()
-    for skill1 in final_keywords:
-        for skill2 in final_keywords:
-            if skill1 != skill2 and skill1 in skill2:
-                to_remove.add(skill1)
-
-    return [skill for skill in final_keywords if skill not in to_remove]
-
+    return list(keywords)
 
 def match_resume_to_job(resume_keywords, job_skills):
     resume_set = set(k.lower() for k in resume_keywords)
@@ -291,8 +336,10 @@ def user_view():
     
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file) if uploaded_file.name.endswith(".pdf") else extract_text_from_docx(uploaded_file)
+        
+        # Use the new, improved parsing functions
         name = extract_name(text)
-        candidate_email = extract_email_from_text(text)
+        candidate_email = extract_email(text)
         
         filtered_job_df = jobs_df[(jobs_df['title'] == job_role) & (jobs_df['company'] == company)]
         
