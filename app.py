@@ -305,9 +305,9 @@ def user_view():
                 st.error(f"Failed to submit application: {e}")
 
 def hr_view():
-    st.header("🏢 HR Dashboard")
+    st.header("HR Dashboard")
     
-    with st.expander("➕ Add New Job Opening"):
+    with st.expander("Add New Job Opening"):
         with st.form("new_job_form", clear_on_submit=True):
             job_title = st.text_input("Job Title")
             company_name = st.text_input("Company Name")
