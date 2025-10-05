@@ -42,7 +42,7 @@ except OSError:
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- ROBUST RESUME PARSING FUNCTIONS (FROM MIDTERM VERSION) ---
+# --- ROBUST RESUME PARSING FUNCTIONS ---
 def extract_text_from_pdf(file):
     """Extracts text from a PDF file."""
     try:
@@ -64,67 +64,34 @@ def extract_text_from_docx(file):
 def extract_name(text):
     """
     Extracts the name from the resume text using a multi-layered, robust approach.
-    This version is designed to be more accurate across different resume formats.
     """
     lines = [line.strip() for line in text.split('\n') if line.strip()]
-    
-    # Keywords that typically signal the end of personal info and the start of a new section
-    stop_keywords = {
-        'objective', 'summary', 'education', 'experience', 
-        'skills', 'projects', 'certifications', 'contact', 
-        'email', 'phone', 'linkedin', 'profile'
-    }
-    
-    # Keywords to explicitly ignore in a potential name line
+    stop_keywords = {'objective', 'summary', 'education', 'experience', 'skills', 'projects', 'contact', 'email', 'phone', 'linkedin'}
     ignore_keywords = ['@', 'resume', 'curriculum']
 
-    # --- Step 1: Look for an ALL CAPS name at the top of the resume ---
+    # --- Step 1: Look for an ALL CAPS name at the top ---
     name_lines = []
-    for i in range(min(10, len(lines))): # Limit search to the top 10 lines
+    for i in range(min(10, len(lines))):
         line = lines[i]
         clean_line = line.lower()
-
-        # If we hit a section header, stop looking for the name
-        if any(stop_word in clean_line for stop_word in stop_keywords):
-            break
-
-        if any(ignore_word in clean_line for ignore_word in ignore_keywords):
-            continue
-
-        # A strong candidate for a name is in all caps, consists of 1-3 words, 
-        # and contains only letters.
+        if any(stop_word in clean_line for stop_word in stop_keywords): break
+        if any(ignore_word in clean_line for ignore_word in ignore_keywords): continue
         words = line.split()
         if 1 <= len(words) <= 3 and all(word.isupper() and word.isalpha() for word in words):
             name_lines.append(line)
+    if 1 <= len(name_lines) <= 2: return " ".join(name_lines).title()
 
-    if 1 <= len(name_lines) <= 2:
-        return " ".join(name_lines).title()
-
-    # --- Step 2: Fallback to spaCy's Named Entity Recognition (NER) ---
-    doc = nlp(text[:500]) 
-    # Keywords to filter out common location-based misinterpretations by the NER model.
+    # --- Step 2: Fallback to spaCy's NER ---
+    doc = nlp(text[:500])
     location_keywords = {'pradesh', 'nagar', 'street', 'road', 'district', 'state', 'city', 'country', 'india'}
-
     for ent in doc.ents:
         if ent.label_ == "PERSON" and 1 <= len(ent.text.split()) <= 4:
-            # Check to ensure it's not grabbing a section title by mistake
-            if ent.text.lower() in stop_keywords:
-                continue
-
-            # Check if the entity text contains any location-specific keywords.
-            # This prevents addresses from being mistaken for names.
-            if any(loc_word in ent.text.lower().split() for loc_word in location_keywords):
-                continue
-
+            if ent.text.lower() in stop_keywords: continue
+            if any(loc_word in ent.text.lower().split() for loc_word in location_keywords): continue
             return ent.text.title()
 
-    # --- Step 3: Fallback to the first line as a last resort ---
-    if lines:
-        first_line = lines[0].strip().title()
-        # A final check to avoid returning something that is clearly not a name
-        if len(first_line.split()) <= 4:
-            return first_line
-        
+    # --- Step 3: Fallback to the first line ---
+    if lines and len(lines[0].strip().split()) <= 4: return lines[0].strip().title()
     return "Not Found"
 
 def extract_email(text):
@@ -132,9 +99,7 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- END OF UPDATED PARSING FUNCTIONS ---
-    
-# Keyword matching functions
+# --- CORRECTED & ROBUST SKILL EXTRACTION (MIDTERM LOGIC) ---
 def extract_keywords(text):
     """
     Extracts skills using a hybrid approach for better balance of precision and flexibility.
@@ -154,7 +119,7 @@ def extract_keywords(text):
         'description', 'responsibility', 'responsibilities', 'objective', 'team'
     }
 
-    # --- Step 1: High-Precision Matcher for common, unambiguous skills ---
+    # --- Step 1: High-Precision Matcher for common, unambiguous multi-word skills ---
     patterns = {
         "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
         "unit testing": [[{"LOWER": "unit"}, {"LOWER": "testing"}]], "data visualization": [[{"LOWER": "data"}, {"LOWER": "visualization"}]],
@@ -173,6 +138,7 @@ def extract_keywords(text):
     for match_id, start, end in matches:
         span = doc[start:end]
         keywords.add(span.text)
+        # Add base skill if a compound is found (e.g., add 'java' for 'core java')
         if span.text == "core java":
             keywords.add("java")
         for i in range(start, end):
@@ -180,9 +146,11 @@ def extract_keywords(text):
 
     # --- Step 2: General Noun Chunk Extraction for other potential skills ---
     for chunk in doc.noun_chunks:
+        # Ensure we don't re-process tokens that were already part of a matched skill
         if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
             clean_chunk = chunk.lemma_.strip()
             tokens_in_chunk = clean_chunk.split()
+            # Filter out chunks that are too short or contain ignored words
             if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
                 keywords.add(clean_chunk)
 
@@ -190,6 +158,7 @@ def extract_keywords(text):
     for token in doc:
         if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
             lemma = token.lemma_.strip()
+            # Further filtering for single words
             if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
                 
@@ -200,6 +169,8 @@ def extract_keywords(text):
 
     return list(keywords)
 
+# --- END OF SKILL EXTRACTION LOGIC ---
+    
 def match_resume_to_job(resume_keywords, job_skills):
     resume_set = set(k.lower() for k in resume_keywords)
     job_set = set(s.lower() for s in job_skills)
@@ -338,7 +309,6 @@ def user_view():
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file) if uploaded_file.name.endswith(".pdf") else extract_text_from_docx(uploaded_file)
         
-        # Use the robust parsing functions
         name = extract_name(text)
         candidate_email = extract_email(text)
         
@@ -362,8 +332,8 @@ def user_view():
             st.write(f"**Calculated Match Score:** {score}%"); st.write(f"**Parsed Name:** {name}")
             st.write(f"**Parsed Email:** {candidate_email}"); st.write(f"**Initial Phase:** {phase}")
         with col2:
-            st.write(f"**Matched Skills:**"); st.success(f"{', '.join(matched) if matched else 'None'}")
-            st.write(f"**Missing Skills:**"); st.error(f"{', '.join(missing) if missing else 'None'}")
+            st.write(f"**Matched Skills:**"); st.success(f"{', '.join(sorted(matched)) if matched else 'None'}")
+            st.write(f"**Missing Skills:**"); st.error(f"{', '.join(sorted(missing)) if missing else 'None'}")
         
         if st.button("Confirm and Submit Application"):
             application_data = {"user_id": st.session_state["user_id"], "job_id": job_id, "match_score": score,
@@ -388,7 +358,7 @@ def hr_view():
             submitted = st.form_submit_button("Add Job")
             if submitted:
                 if job_title and company_name and job_skills:
-                    skills_list = [skill.strip() for skill in job_skills.split(',')]
+                    skills_list = [skill.strip().lower() for skill in job_skills.split(',')]
                     new_job_data = {
                         "title": job_title, "company": company_name,
                         "description": job_description, "skills": skills_list
@@ -500,3 +470,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
