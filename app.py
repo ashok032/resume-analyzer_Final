@@ -28,15 +28,14 @@ except Exception as e:
     st.error(f"Could not connect to Supabase. Please check your URL and Key. Error: {e}")
     st.stop()
     
-# --- PERMANENT FIX: Use the more powerful 'md' model for its word vectors ---
-# This is the key to enabling truly dynamic and accurate skill recognition.
+# --- PERMANENT FIX: Use the more powerful 'md' model, loaded via requirements.txt ---
+# This avoids the download command and the resulting permission errors.
 try:
     nlp = spacy.load("en_core_web_md")
 except OSError:
-    st.info("Downloading more powerful spaCy model (en_core_web_md)... This may take a moment.")
-    from spacy.cli import download
-    download("en_core_web_md")
-    nlp = spacy.load("en_core_web_md")
+    # This error will now only appear if the requirements.txt file is incorrect.
+    st.error("Could not load the 'en_core_web_md' model. Please ensure your requirements.txt file is correctly configured.")
+    st.stop()
 
 # -------------------- Helpers --------------------
 def hash_password(password):
@@ -89,10 +88,19 @@ def extract_keywords(text):
         'phone', 'address', 'linkedin', 'github', 'name', 'date', 'month', 'year', 
         'company', 'university', 'college', 'gpa', 'description', 'responsibility', 
         'responsibilities', 'objective', 'team', 'inc', 'ltd', 'website', 'client',
-        'page', 'demo', 'live'
+        'page', 'demo', 'live', 'engineering'
     }
 
-    # STEP 2: Extract Noun Chunks - This is the primary method for finding multi-word skills
+    # STEP 2: Extract Named Entities - The 'md' model is great at finding products & organizations
+    # e.g., "PostgreSQL", "Google Cloud", "Git"
+    for ent in doc.ents:
+        if ent.label_ in ['ORG', 'PRODUCT']:
+            # Lemmatize and clean the entity text
+            clean_ent = ent.lemma_.strip()
+            if len(clean_ent) > 2 and clean_ent not in IGNORE_WORDS:
+                keywords.add(clean_ent)
+
+    # STEP 3: Extract Noun Chunks - The primary method for finding multi-word skills
     # e.g., "natural language processing", "full-stack development", "spring boot"
     for chunk in doc.noun_chunks:
         clean_chunk = chunk.lemma_.strip()
@@ -100,22 +108,21 @@ def extract_keywords(text):
         if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in clean_chunk.split()) and not clean_chunk.isnumeric():
             keywords.add(clean_chunk)
 
-    # STEP 3: Extract Important Single Words (Proper Nouns, Nouns)
-    # This finds skills like "Java", "Python", "AWS", "Git", "SQL"
+    # STEP 4: Extract Important Single Words (Proper Nouns, Nouns)
+    # This finds skills like "Java", "Python", "React"
     for token in doc:
-        # Check if the word is a proper noun or a noun, and it's not a stop word or in our ignore list
         if token.pos_ in ('PROPN', 'NOUN') and not token.is_stop and token.lemma_ not in IGNORE_WORDS:
             lemma = token.lemma_.strip()
             if len(lemma) > 1:
                 keywords.add(lemma)
 
-    # STEP 4: Dynamic Acronym Detection - A rule to find capitalized acronyms
+    # STEP 5: Dynamic Acronym Detection - A rule to find capitalized acronyms
     # This specifically targets skills like AWS, GCP, CI/CD etc.
     acronyms = re.findall(r'\b[A-Z]{2,5}\b', original_text)
     for acronym in acronyms:
         keywords.add(acronym.lower())
 
-    # STEP 5: Final Cleanup - Remove any remaining ignored words that might have slipped through
+    # STEP 6: Final Cleanup - Remove any remaining ignored words that might have slipped through
     final_keywords = {k for k in keywords if k not in IGNORE_WORDS}
 
     return list(final_keywords)
