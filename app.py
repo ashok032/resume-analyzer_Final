@@ -99,77 +99,55 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- CORRECTED & ROBUST SKILL EXTRACTION (MIDTERM LOGIC) ---
+# --- FULLY DYNAMIC & AI-DRIVEN SKILL EXTRACTION ---
 def extract_keywords(text):
     """
-    Extracts skills using a hybrid approach for better balance of precision and flexibility.
+    Extracts potential skills using a dynamic NLP-only approach.
+    This version avoids a hardcoded dictionary to discover any skill mentioned.
     """
     original_text = text
     doc = nlp(text.lower())
-    matcher = Matcher(nlp.vocab)
     keywords = set()
-    matched_tokens = set()
 
-    # A set of common non-skill words to filter out from results
+    # Expanded list of common non-skill words to improve accuracy by filtering noise
     IGNORE_WORDS = {
         'experience', 'skill', 'skills', 'profile', 'summary', 'education',
         'project', 'projects', 'internship', 'internships', 'work', 'role',
         'contact', 'email', 'phone', 'address', 'linkedin', 'github', 'name',
         'date', 'month', 'year', 'company', 'university', 'college', 'gpa',
-        'description', 'responsibility', 'responsibilities', 'objective', 'team'
+        'description', 'responsibility', 'responsibilities', 'objective', 'team',
+        'location', 'city', 'state', 'country', 'inc', 'ltd', 'llc', 'references',
+        'available', 'request', 'january', 'february', 'march', 'april', 'may',
+        'june', 'july', 'august', 'september', 'october', 'november', 'december'
     }
 
-    # --- Step 1: High-Precision Matcher for common, unambiguous multi-word skills ---
-    patterns = {
-        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
-        "unit testing": [[{"LOWER": "unit"}, {"LOWER": "testing"}]], "data visualization": [[{"LOWER": "data"}, {"LOWER": "visualization"}]],
-        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], "deep learning": [[{"LOWER": "deep"}, {"LOWER": "learning"}]],
-        "computer vision": [[{"LOWER": "computer"}, {"LOWER": "vision"}]], "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
-        "microservices": [[{"LOWER": "microservices"}]], "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]],
-        "ci/cd": [[{"LOWER": "ci"}, {"LOWER": "/"}, {"LOWER": "cd"}]], "google cloud": [[{"LOWER": "google"}, {"LOWER": "cloud"}]],
-        "adobe xd": [[{"LOWER": "adobe"}, {"LOWER": "xd"}]], "power bi": [[{"LOWER": "power"}, {"LOWER": "bi"}]],
-        "sql developer": [[{"LOWER": "sql"}, {"LOWER": "developer"}]]
-    }
-
-    for skill, pattern in patterns.items():
-        matcher.add(skill, pattern)
-
-    matches = matcher(doc)
-    for match_id, start, end in matches:
-        span = doc[start:end]
-        keywords.add(span.text)
-        # Add base skill if a compound is found (e.g., add 'java' for 'core java')
-        if span.text == "core java":
-            keywords.add("java")
-        for i in range(start, end):
-            matched_tokens.add(i)
-
-    # --- Step 2: General Noun Chunk Extraction for other potential skills ---
+    # --- Step 1: Extract skills from Noun Chunks ---
+    # Noun chunks are base noun phrases like "data visualization" or "machine learning models"
     for chunk in doc.noun_chunks:
-        # Ensure we don't re-process tokens that were already part of a matched skill
-        if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
-            clean_chunk = chunk.lemma_.strip()
-            tokens_in_chunk = clean_chunk.split()
-            # Filter out chunks that are too short or contain ignored words
-            if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
-                keywords.add(clean_chunk)
+        clean_chunk = chunk.lemma_.strip()
+        tokens_in_chunk = clean_chunk.split()
+        
+        # Filter out chunks that are too short or contain ignored words
+        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
+            keywords.add(clean_chunk)
 
-    # --- Step 3: Extract Single-Word PROPN and NOUN skills ---
+    # --- Step 2: Extract Single-Word PROPN and NOUN skills ---
+    # This catches single-word skills like "Java", "Python", "SQL", "Tableau"
     for token in doc:
-        if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
+        # Check if the token is a Proper Noun or a regular Noun
+        if token.pos_ in ('PROPN', 'NOUN'):
             lemma = token.lemma_.strip()
-            # Further filtering for single words
+            # Further filtering for single words to ensure relevance
             if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
                 
-    # --- Step 4: Use Regular Expressions for Specific Formats ---
+    # --- Step 3: Use Regular Expressions for Specific Formats ---
+    # This helps catch skills written in special formats like "C++", ".NET", etc.
     special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b', original_text)
     for skill in special_formats:
         keywords.add(skill.lower())
 
     return list(keywords)
-
-# --- END OF SKILL EXTRACTION LOGIC ---
     
 def match_resume_to_job(resume_keywords, job_skills):
     resume_set = set(k.lower() for k in resume_keywords)
@@ -320,10 +298,15 @@ def user_view():
         selected_job = filtered_job_df.iloc[0]
         jd_skills, job_id = selected_job['skills'], selected_job['id']
 
-        # --- DEFINITIVE FIX FOR SKILLS DATA TYPE ---
-        # This ensures that skills from the database are always treated as a list.
+        # --- FIX FOR SKILLS DATA TYPE ---
         if isinstance(jd_skills, str):
-            jd_skills = [skill.strip() for skill in jd_skills.strip("[]").replace("'", "").replace('"', '').split(',')]
+            import json
+            try:
+                # Attempt to parse it as JSON first
+                jd_skills = json.loads(jd_skills.replace("'", '"'))
+            except json.JSONDecodeError:
+                # Fallback for simple comma-separated strings
+                jd_skills = [skill.strip() for skill in jd_skills.strip("[]").replace("'", "").replace('"', '').split(',')]
 
         
         resume_keywords = extract_keywords(text)
