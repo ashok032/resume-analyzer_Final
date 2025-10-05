@@ -45,12 +45,14 @@ except OSError:
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# Resume parsing functions
+# --- UPDATED RESUME PARSING FUNCTIONS ---
 def extract_text_from_pdf(file):
+    """Extracts text from a PDF file."""
     with pdfplumber.open(file) as pdf:
         return "\n".join(page.extract_text() or "" for page in pdf.pages)
 
 def extract_text_from_docx(file):
+    """Extracts text from a DOCX file."""
     doc = docx.Document(file)
     return "\n".join(p.text for p in doc.paragraphs)
 
@@ -104,7 +106,7 @@ def extract_name(text):
             if ent.text.lower() in stop_keywords:
                 continue
 
-            # ADDED: Check if the entity text contains any location-specific keywords.
+            # Check if the entity text contains any location-specific keywords.
             # This prevents addresses from being mistaken for names.
             if any(loc_word in ent.text.lower().split() for loc_word in location_keywords):
                 continue
@@ -118,16 +120,11 @@ def extract_name(text):
         if len(first_line.split()) <= 4:
             return first_line
         
-    return "N/A"
+    return "Not Found"
 
 def extract_email(text):
     """Extracts email from text using regex."""
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
-    return match.group(0) if match else "Not found"
-
-def extract_phone(text):
-    """Extracts phone number from text using a more flexible regex."""
-    match = re.search(r'(\+?\d{1,3}[\s\-]?)?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}', text)
     return match.group(0) if match else "Not found"
     
 # Keyword matching functions
