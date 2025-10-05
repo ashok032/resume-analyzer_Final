@@ -72,7 +72,12 @@ def extract_keywords(text):
     Extracts skills using the proven hybrid approach for the best balance of precision and discovery.
     """
     original_text = text
-    doc = nlp(text.lower())
+    
+    # --- FIX: Clean text to handle punctuation that can separate skill words ---
+    # This turns "(Spring Boot)" or "Spring Boot," into "Spring Boot " for easier matching.
+    cleaned_text_for_spacy = re.sub(r'[(),|]', ' ', original_text)
+    
+    doc = nlp(cleaned_text_for_spacy.lower()) # Use cleaned text for spaCy processing
     matcher = Matcher(nlp.vocab)
     keywords = set()
     matched_tokens = set()
