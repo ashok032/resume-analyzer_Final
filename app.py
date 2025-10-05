@@ -73,9 +73,9 @@ def extract_keywords(text):
     """
     original_text = text
     
-    # --- FIX: Clean text to handle punctuation that can separate skill words ---
-    # This turns "(Spring Boot)" or "Spring Boot," into "Spring Boot " for easier matching.
-    cleaned_text_for_spacy = re.sub(r'[(),|]', ' ', original_text)
+    # --- DEFINITIVE FIX: Clean text to handle punctuation AND NEWLINES that can separate skill words ---
+    # This turns "(Spring\nBoot)" or "Spring Boot," into "Spring Boot " for easier matching.
+    cleaned_text_for_spacy = re.sub(r'[(),|\n]', ' ', original_text)
     
     doc = nlp(cleaned_text_for_spacy.lower()) # Use cleaned text for spaCy processing
     matcher = Matcher(nlp.vocab)
