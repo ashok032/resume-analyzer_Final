@@ -66,18 +66,25 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- CORRECTED HYBRID SKILL EXTRACTION ---
+# --- DEFINITIVELY CORRECTED HYBRID SKILL EXTRACTION ---
 def extract_keywords(text):
     """
     Extracts skills using the proven hybrid approach for the best balance of precision and discovery.
     """
     original_text = text
     
-    # --- DEFINITIVE FIX: Clean text to handle punctuation AND NEWLINES that can separate skill words ---
-    # This turns "(Spring\nBoot)" or "Spring Boot," into "Spring Boot " for easier matching.
-    cleaned_text_for_spacy = re.sub(r'[(),|\n]', ' ', original_text)
+    # --- STEP 1: Pre-process the text thoroughly ---
+    # Convert to lowercase FIRST to ensure case-insensitive cleaning and matching.
+    lower_text = original_text.lower()
     
-    doc = nlp(cleaned_text_for_spacy.lower()) # Use cleaned text for spaCy processing
+    # Clean text to handle punctuation AND newlines that can separate skill words.
+    # This turns "(spring\nboot)" or "spring boot," into "spring boot ".
+    cleaned_text = re.sub(r'[(),|\n\r]', ' ', lower_text)
+    
+    # Collapse multiple spaces into one to normalize whitespace.
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+    
+    doc = nlp(cleaned_text) # Process the final, clean text
     matcher = Matcher(nlp.vocab)
     keywords = set()
     matched_tokens = set()
@@ -90,7 +97,7 @@ def extract_keywords(text):
         'responsibilities', 'objective', 'team', 'inc', 'ltd'
     }
 
-    # --- Step 1: High-Precision Matcher for common, unambiguous skills ---
+    # --- STEP 2: High-Precision Matcher for common, unambiguous skills ---
     patterns = {
         "java": [[{"LOWER": "java"}]], "sql": [[{"LOWER": "sql"}]], "python": [[{"LOWER": "python"}]],
         "react": [[{"LOWER": "react"}]], "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], 
@@ -116,21 +123,21 @@ def extract_keywords(text):
         for i in range(start, end):
             matched_tokens.add(i)
 
-    # --- Step 2: General Noun Chunk Extraction to discover ANY other skill ---
+    # --- STEP 3: General Noun Chunk Extraction to discover ANY other skill ---
     for chunk in doc.noun_chunks:
         if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
             clean_chunk = chunk.lemma_.strip()
             if len(clean_chunk) > 2 and clean_chunk not in IGNORE_WORDS and not any(word in IGNORE_WORDS for word in clean_chunk.split()):
                 keywords.add(clean_chunk)
 
-    # --- Step 3: Extract Single-Word PROPN and NOUN skills (as a fallback) ---
+    # --- STEP 4: Extract Single-Word PROPN and NOUN skills (as a fallback) ---
     for token in doc:
         if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
             lemma = token.lemma_.strip()
             if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
                 
-    # --- Step 4: Use Regular Expressions for Specific Formats ---
+    # --- STEP 5: Use Regular Expressions for Specific Formats (run on original text for case) ---
     special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b', original_text)
     for skill in special_formats:
         keywords.add(skill.lower())
