@@ -319,6 +319,12 @@ def user_view():
 
         selected_job = filtered_job_df.iloc[0]
         jd_skills, job_id = selected_job['skills'], selected_job['id']
+
+        # --- DEFINITIVE FIX FOR SKILLS DATA TYPE ---
+        # This ensures that skills from the database are always treated as a list.
+        if isinstance(jd_skills, str):
+            jd_skills = [skill.strip() for skill in jd_skills.strip("[]").replace("'", "").replace('"', '').split(',')]
+
         
         resume_keywords = extract_keywords(text)
         matched, missing, score = match_resume_to_job(resume_keywords, jd_skills)
