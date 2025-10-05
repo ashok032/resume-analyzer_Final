@@ -5,13 +5,10 @@ import pdfplumber
 import docx
 import re
 import spacy
-import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
-from datetime import datetime, timedelta
+from datetime import datetime
 from supabase import create_client, Client
 from spacy.matcher import Matcher
 
@@ -45,16 +42,24 @@ except OSError:
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- UPDATED RESUME PARSING FUNCTIONS ---
+# --- ROBUST RESUME PARSING FUNCTIONS (FROM MIDTERM VERSION) ---
 def extract_text_from_pdf(file):
     """Extracts text from a PDF file."""
-    with pdfplumber.open(file) as pdf:
-        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+    try:
+        with pdfplumber.open(file) as pdf:
+            return "\n".join(page.extract_text() or '' for page in pdf.pages)
+    except Exception as e:
+        st.error(f"Error reading PDF file: {e}")
+        return ""
 
 def extract_text_from_docx(file):
     """Extracts text from a DOCX file."""
-    doc = docx.Document(file)
-    return "\n".join(p.text for p in doc.paragraphs)
+    try:
+        doc = docx.Document(file)
+        return "\n".join(para.text for para in doc.paragraphs)
+    except Exception as e:
+        st.error(f"Error reading DOCX file: {e}")
+        return ""
 
 def extract_name(text):
     """
@@ -126,6 +131,8 @@ def extract_email(text):
     """Extracts email from text using regex."""
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
+
+# --- END OF UPDATED PARSING FUNCTIONS ---
     
 # Keyword matching functions
 def extract_keywords(text):
@@ -267,7 +274,6 @@ def login_register_ui():
             else:
                 st.error("Invalid credentials.")
         
-        # --- NEW: Password Reset Functionality ---
         with st.expander("Forgot Password?"):
             with st.form("reset_password_form", clear_on_submit=False):
                 st.write("Reset your password by entering your email and a new password.")
@@ -283,13 +289,11 @@ def login_register_ui():
                     elif new_password_reset != confirm_password_reset:
                         st.error("Passwords do not match. Please try again.")
                     else:
-                        # Check if user exists
                         user_check = supabase.table('users').select('id').eq('email', email_reset).execute()
                         if not user_check.data:
                             st.error("This email is not registered. Please check the email address.")
                         else:
                             try:
-                                # Hash the new password and update the database
                                 new_hashed_password = hash_password(new_password_reset)
                                 supabase.table('users').update({'password_hash': new_hashed_password}).eq('email', email_reset).execute()
                                 st.success("Password reset successfully! You can now log in with your new password.")
@@ -334,7 +338,7 @@ def user_view():
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file) if uploaded_file.name.endswith(".pdf") else extract_text_from_docx(uploaded_file)
         
-        # Use the new, improved parsing functions
+        # Use the robust parsing functions
         name = extract_name(text)
         candidate_email = extract_email(text)
         
