@@ -29,12 +29,10 @@ except Exception as e:
     st.stop()
     
 # --- PERMANENT FIX: Use the more powerful 'md' model, loaded via requirements.txt ---
-# This avoids the download command and the resulting permission errors.
 try:
     nlp = spacy.load("en_core_web_md")
 except OSError:
-    # This error will now only appear if the requirements.txt file is incorrect.
-    st.error("Could not load the 'en_core_web_md' model. Please ensure your requirements.txt file is correctly configured.")
+    st.error("Could not load 'en_core_web_md' model. Ensure your requirements.txt is correct and the app has restarted.")
     st.stop()
 
 # -------------------- Helpers --------------------
@@ -65,66 +63,73 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- THE DEFINITIVE, TRULY DYNAMIC SKILL EXTRACTOR ---
+# --- THE DEFINITIVE, HYBRID INTELLIGENCE SKILL EXTRACTOR ---
 def extract_keywords(text):
     """
-    Extracts skills using a pure NLP pipeline, leveraging the powerful 'md' model
-    to discover any skill without relying on a hardcoded dictionary.
+    Extracts skills using a robust, two-stage process:
+    1. A high-precision Regex scan for known multi-word skills to defeat text fragmentation.
+    2. A dynamic AI analysis on the remaining text to discover all other skills.
     """
     original_text = text
     
-    # STEP 1: Pre-process the text thoroughly to handle formatting issues.
+    # STEP 1: Aggressive Text Cleaning
     lower_text = original_text.lower()
-    text_single_line = re.sub(r'[\n\r]', ' ', lower_text)
-    cleaned_text = re.sub(r'[(),|]', ' ', text_single_line)
+    single_line_text = re.sub(r'[\n\r]', ' ', lower_text)
+    cleaned_text = re.sub(r'[(),|/:]', ' ', single_line_text)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
-    doc = nlp(cleaned_text)
     keywords = set()
+    text_for_ai = cleaned_text
 
+    # --- STAGE 1: GUARANTEED SKILL FINDER (High-Precision Regex) ---
+    # This list is NOT for discovery. It is a GUARANTEE that these common,
+    # often-fragmented skills are NEVER missed. This is the permanent fix.
+    guaranteed_skills = [
+        "spring boot", "rest api", "restful apis", "machine learning", "react native",
+        "node.js", "express.js", "react.js", "react hooks", "react router", 
+        "natural language processing", "power bi", "google cloud", "core java"
+    ]
+    for skill in guaranteed_skills:
+        # Use regex to find the skill as a whole word (\b)
+        if re.search(r'\b' + re.escape(skill) + r'\b', text_for_ai):
+            keywords.add(skill)
+            # Remove the skill to avoid duplicate processing by the AI
+            text_for_ai = text_for_ai.replace(skill, '')
+
+    # --- STAGE 2: DYNAMIC DISCOVERY ENGINE (AI Analysis) ---
+    # The powerful 'md' model now analyzes the REMAINING text to find *everything else*.
+    doc = nlp(text_for_ai)
+    
     IGNORE_WORDS = {
         'experience', 'skill', 'skills', 'profile', 'summary', 'education', 'project', 
         'projects', 'internship', 'internships', 'work', 'role', 'contact', 'email', 
         'phone', 'address', 'linkedin', 'github', 'name', 'date', 'month', 'year', 
         'company', 'university', 'college', 'gpa', 'description', 'responsibility', 
         'responsibilities', 'objective', 'team', 'inc', 'ltd', 'website', 'client',
-        'page', 'demo', 'live', 'engineering'
+        'page', 'demo', 'live', 'engineering', 'developer', 'using', 'and', 'etc'
     }
 
-    # STEP 2: Extract Named Entities - The 'md' model is great at finding products & organizations
-    # e.g., "PostgreSQL", "Google Cloud", "Git"
-    for ent in doc.ents:
-        if ent.label_ in ['ORG', 'PRODUCT']:
-            # Lemmatize and clean the entity text
-            clean_ent = ent.lemma_.strip()
-            if len(clean_ent) > 2 and clean_ent not in IGNORE_WORDS:
-                keywords.add(clean_ent)
-
-    # STEP 3: Extract Noun Chunks - The primary method for finding multi-word skills
-    # e.g., "natural language processing", "full-stack development", "spring boot"
+    # AI Discovery Method A: Noun Chunks (for other multi-word skills like "data visualization")
     for chunk in doc.noun_chunks:
         clean_chunk = chunk.lemma_.strip()
-        # Filter out chunks that are too short, contain ignore words, or are just numbers
-        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in clean_chunk.split()) and not clean_chunk.isnumeric():
+        if len(clean_chunk) > 2 and clean_chunk not in IGNORE_WORDS and not any(w in IGNORE_WORDS for w in clean_chunk.split()):
             keywords.add(clean_chunk)
 
-    # STEP 4: Extract Important Single Words (Proper Nouns, Nouns)
-    # This finds skills like "Java", "Python", "React"
+    # AI Discovery Method B: Single Words (for skills like "Java", "Python", "AWS", "Git")
     for token in doc:
         if token.pos_ in ('PROPN', 'NOUN') and not token.is_stop and token.lemma_ not in IGNORE_WORDS:
             lemma = token.lemma_.strip()
             if len(lemma) > 1:
                 keywords.add(lemma)
 
-    # STEP 5: Dynamic Acronym Detection - A rule to find capitalized acronyms
-    # This specifically targets skills like AWS, GCP, CI/CD etc.
+    # AI Discovery Method C: Acronyms (a final check using original casing)
     acronyms = re.findall(r'\b[A-Z]{2,5}\b', original_text)
     for acronym in acronyms:
         keywords.add(acronym.lower())
 
-    # STEP 6: Final Cleanup - Remove any remaining ignored words that might have slipped through
-    final_keywords = {k for k in keywords if k not in IGNORE_WORDS}
-
+    # Final Cleanup
+    final_keywords = {k.strip() for k in keywords if k and k not in IGNORE_WORDS}
+    
     return list(final_keywords)
     
 def match_resume_to_job(resume_keywords, job_skills):
