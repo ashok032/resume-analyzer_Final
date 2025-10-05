@@ -61,45 +61,12 @@ def extract_text_from_docx(file):
         st.error(f"Error reading DOCX file: {e}")
         return ""
 
-def extract_name(text):
-    """
-    Extracts the name from the resume text using a multi-layered, robust approach.
-    """
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    stop_keywords = {'objective', 'summary', 'education', 'experience', 'skills', 'projects', 'contact', 'email', 'phone', 'linkedin'}
-    ignore_keywords = ['@', 'resume', 'curriculum']
-
-    # --- Step 1: Look for an ALL CAPS name at the top ---
-    name_lines = []
-    for i in range(min(10, len(lines))):
-        line = lines[i]
-        clean_line = line.lower()
-        if any(stop_word in clean_line for stop_word in stop_keywords): break
-        if any(ignore_word in clean_line for ignore_word in ignore_keywords): continue
-        words = line.split()
-        if 1 <= len(words) <= 3 and all(word.isupper() and word.isalpha() for word in words):
-            name_lines.append(line)
-    if 1 <= len(name_lines) <= 2: return " ".join(name_lines).title()
-
-    # --- Step 2: Fallback to spaCy's NER ---
-    doc = nlp(text[:500])
-    location_keywords = {'pradesh', 'nagar', 'street', 'road', 'district', 'state', 'city', 'country', 'india'}
-    for ent in doc.ents:
-        if ent.label_ == "PERSON" and 1 <= len(ent.text.split()) <= 4:
-            if ent.text.lower() in stop_keywords: continue
-            if any(loc_word in ent.text.lower().split() for loc_word in location_keywords): continue
-            return ent.text.title()
-
-    # --- Step 3: Fallback to the first line ---
-    if lines and len(lines[0].strip().split()) <= 4: return lines[0].strip().title()
-    return "Not Found"
-
 def extract_email(text):
     """Extracts email from text using regex."""
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- CORRECTED HYBRID SKILL EXTRACTION (FROM MIDTERM) ---
+# --- CORRECTED HYBRID SKILL EXTRACTION ---
 def extract_keywords(text):
     """
     Extracts skills using the proven hybrid approach for the best balance of precision and discovery.
@@ -119,17 +86,11 @@ def extract_keywords(text):
     }
 
     # --- Step 1: High-Precision Matcher for common, unambiguous skills ---
-    # This guarantees the most important skills are always found correctly.
     patterns = {
-        "java": [[{"LOWER": "java"}]],
-        "sql": [[{"LOWER": "sql"}]],
-        "python": [[{"LOWER": "python"}]],
-        "react": [[{"LOWER": "react"}]],
-        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], 
-        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
-        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], 
-        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
-        "microservices": [[{"LOWER": "microservices"}]], 
+        "java": [[{"LOWER": "java"}]], "sql": [[{"LOWER": "sql"}]], "python": [[{"LOWER": "python"}]],
+        "react": [[{"LOWER": "react"}]], "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], 
+        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]], "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], 
+        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]], "microservices": [[{"LOWER": "microservices"}]], 
         "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]]
     }
 
@@ -142,16 +103,10 @@ def extract_keywords(text):
         span_text = span.text
         keywords.add(span_text)
         
-        # Add base skills for compound terms
-        if span_text == "core java":
-            keywords.add("java")
-        elif span_text == "spring boot":
-            keywords.add("spring")
-        elif span_text == "rest api":
-            keywords.add("api")
-            keywords.add("rest")
-        elif span_text == "node.js":
-            keywords.add("node")
+        if span_text == "core java": keywords.add("java")
+        elif span_text == "spring boot": keywords.add("spring")
+        elif span_text == "rest api": keywords.add("api"); keywords.add("rest")
+        elif span_text == "node.js": keywords.add("node")
 
         for i in range(start, end):
             matched_tokens.add(i)
@@ -215,7 +170,7 @@ def load_jobs_from_db():
     return pd.DataFrame(response.data) if response.data else pd.DataFrame(columns=['id', 'title', 'company', 'skills', 'description'])
 
 def load_all_applications():
-    final_cols = ["id", "logged_in_username", "email", "name", "role", "company", "match_score", "current_phase", "status"]
+    final_cols = ["id", "logged_in_username", "email", "candidate_name", "role", "company", "match_score", "current_phase", "status"]
     try:
         response = supabase.table('applications').select(
             'id, match_score, phase, status, candidate_name, candidate_email, users(email), jobs(title, company)'
@@ -227,7 +182,7 @@ def load_all_applications():
         return pd.DataFrame(columns=final_cols)
     df = pd.json_normalize(response.data)
     df.rename(columns={
-        'candidate_name': 'name', 'candidate_email': 'email', 'phase': 'current_phase',
+        'candidate_email': 'email', 'phase': 'current_phase',
         'users.email': 'logged_in_username', 'jobs.title': 'role', 'jobs.company': 'company'
     }, inplace=True)
     for col in final_cols:
@@ -315,7 +270,6 @@ def user_view():
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file) if uploaded_file.name.endswith(".pdf") else extract_text_from_docx(uploaded_file)
         
-        name = extract_name(text)
         candidate_email = extract_email(text)
         
         filtered_job_df = jobs_df[(jobs_df['title'] == job_role) & (jobs_df['company'] == company)]
@@ -326,14 +280,11 @@ def user_view():
         selected_job = filtered_job_df.iloc[0]
         jd_skills, job_id = selected_job['skills'], selected_job['id']
 
-        # --- FIX FOR SKILLS DATA TYPE FROM DATABASE ---
         if isinstance(jd_skills, str):
             import json
             try:
-                # Attempt to parse it as JSON first (handles lists like '["a", "b"]')
                 jd_skills = json.loads(jd_skills.replace("'", '"'))
             except json.JSONDecodeError:
-                # Fallback for simple comma-separated strings
                 jd_skills = [skill.strip() for skill in jd_skills.strip("[]{}").replace("'", "").replace('"', '').split(',')]
         
         resume_keywords = extract_keywords(text)
@@ -345,8 +296,9 @@ def user_view():
         
         col1, col2 = st.columns(2)
         with col1:
-            st.write(f"**Calculated Match Score:** {score}%"); st.write(f"**Parsed Name:** {name}")
-            st.write(f"**Parsed Email:** {candidate_email}"); st.write(f"**Initial Phase:** {phase}")
+            st.write(f"**Calculated Match Score:** {score}%")
+            st.write(f"**Parsed Email:** {candidate_email}")
+            st.write(f"**Initial Phase:** {phase}")
         with col2:
             st.write(f"**Matched Skills:**"); st.success(f"{', '.join(sorted(matched)) if matched else 'None'}")
             st.write(f"**Missing Skills:**"); st.error(f"{', '.join(sorted(missing)) if missing else 'None'}")
@@ -354,7 +306,7 @@ def user_view():
         if st.button("Confirm and Submit Application"):
             application_data = {"user_id": st.session_state["user_id"], "job_id": job_id, "match_score": score,
                                 "phase": phase, "status": status, "submission_date": datetime.now().isoformat(),
-                                "candidate_name": name, "candidate_email": candidate_email}
+                                "candidate_name": "Candidate", "candidate_email": candidate_email}
             try:
                 supabase.table('applications').insert(application_data).execute()
                 st.success("Application submitted successfully!"); st.rerun()
@@ -393,7 +345,7 @@ def hr_view():
         st.warning("No candidates yet."); return
 
     st.subheader("All Candidates Overview")
-    st.dataframe(df)
+    st.dataframe(df.drop(columns=['candidate_name'])) # Remove name column from overview
     
     st.subheader("Process Candidate")
     eligible_df = df[(df['status'] == 'In Progress') & (df['match_score'] >= 70)].copy()
@@ -408,15 +360,15 @@ def hr_view():
     if filtered_role.empty:
         st.info(f"No eligible candidates for {role_sel} at {company_sel}."); return
 
-    filtered_role['display'] = filtered_role.apply(lambda row: f"{row['name']} ({row['email']})", axis=1)
-    selected_display = st.selectbox("Select Candidate", filtered_role['display'].unique())
+    # Use email as the display identifier
+    selected_display = st.selectbox("Select Candidate Email", filtered_role['email'].unique())
     
     if not selected_display: return
         
-    candidate = filtered_role[filtered_role['display'] == selected_display].iloc[0]
+    candidate = filtered_role[filtered_role['email'] == selected_display].iloc[0]
     app_id = int(candidate['id'])
 
-    st.markdown(f"**Name:** {candidate['name']} | **Score:** {candidate['match_score']}% | **Phase:** {candidate['current_phase']}")
+    st.markdown(f"**Email:** {candidate['email']} | **Score:** {candidate['match_score']}% | **Phase:** {candidate['current_phase']}")
     
     if "Pending Scheduling" in candidate["current_phase"]:
         with st.form(key=f"schedule_form_{app_id}"):
@@ -429,8 +381,9 @@ def hr_view():
             
             if st.form_submit_button("Send Interview Invite"):
                 start_dt = datetime.combine(meeting_date, meeting_time)
+                # Use generic salutation
                 email_body = f"""
-Dear {candidate['name']},
+Dear Candidate,
 
 This is an invitation for an interview for the {candidate['role']} position at {candidate['company']}.
 
@@ -463,7 +416,8 @@ The HR Team
                 elif "Round 2" in current_phase: update_data = {"phase": "Final (Interview Pending Scheduling)"}
                 elif "Final" in current_phase:
                     update_data = {"status": "Selected", "phase": "Selected"}
-                    offer_body = f"Dear {candidate['name']},\n\nCongratulations! You have been selected for the {candidate['role']} position at {candidate['company']}.\n\nWe are excited to welcome you to the team.\n\nBest regards,\nThe HR Team"
+                    # Use generic salutation
+                    offer_body = f"Dear Candidate,\n\nCongratulations! You have been selected for the {candidate['role']} position at {candidate['company']}.\n\nWe are excited to welcome you to the team.\n\nBest regards,\nThe HR Team"
                     send_email(candidate["email"], "Job Offer", offer_body)
             
             if update_data:
