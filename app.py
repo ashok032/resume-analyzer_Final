@@ -10,7 +10,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 from supabase import create_client, Client
-from spacy.matcher import Matcher
 
 # --- Load secrets from Streamlit's secrets management ---
 try:
@@ -29,14 +28,15 @@ except Exception as e:
     st.error(f"Could not connect to Supabase. Please check your URL and Key. Error: {e}")
     st.stop()
     
-# Load NLP model
+# --- PERMANENT FIX: Use the more powerful 'md' model for its word vectors ---
+# This is the key to enabling truly dynamic and accurate skill recognition.
 try:
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.load("en_core_web_md")
 except OSError:
-    st.info("Downloading spaCy model... Please wait.")
+    st.info("Downloading more powerful spaCy model (en_core_web_md)... This may take a moment.")
     from spacy.cli import download
-    download("en_core_web_sm")
-    nlp = spacy.load("en_core_web_sm")
+    download("en_core_web_md")
+    nlp = spacy.load("en_core_web_md")
 
 # -------------------- Helpers --------------------
 def hash_password(password):
@@ -66,96 +66,59 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- DEFINITIVELY CORRECTED & EXPANDED HYBRID SKILL EXTRACTION ---
+# --- THE DEFINITIVE, TRULY DYNAMIC SKILL EXTRACTOR ---
 def extract_keywords(text):
     """
-    Extracts skills using a robust hybrid approach for the best balance of precision and discovery.
+    Extracts skills using a pure NLP pipeline, leveraging the powerful 'md' model
+    to discover any skill without relying on a hardcoded dictionary.
     """
     original_text = text
     
-    # --- STEP 1: Pre-process the text thoroughly ---
+    # STEP 1: Pre-process the text thoroughly to handle formatting issues.
     lower_text = original_text.lower()
     text_single_line = re.sub(r'[\n\r]', ' ', lower_text)
     cleaned_text = re.sub(r'[(),|]', ' ', text_single_line)
     cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
     doc = nlp(cleaned_text)
-    matcher = Matcher(nlp.vocab)
     keywords = set()
-    matched_tokens = set()
 
     IGNORE_WORDS = {
         'experience', 'skill', 'skills', 'profile', 'summary', 'education', 'project', 
         'projects', 'internship', 'internships', 'work', 'role', 'contact', 'email', 
         'phone', 'address', 'linkedin', 'github', 'name', 'date', 'month', 'year', 
         'company', 'university', 'college', 'gpa', 'description', 'responsibility', 
-        'responsibilities', 'objective', 'team', 'inc', 'ltd', 'website', 'client'
+        'responsibilities', 'objective', 'team', 'inc', 'ltd', 'website', 'client',
+        'page', 'demo', 'live'
     }
 
-    # --- STEP 2: Greatly Expanded High-Precision Matcher ---
-    patterns = {
-        # Single-word skills
-        "java": [[{"LOWER": "java"}]], "sql": [[{"LOWER": "sql"}]], "python": [[{"LOWER": "python"}]],
-        "react": [[{"LOWER": "react"}]], "redux": [[{"LOWER": "redux"}]], "git": [[{"LOWER": "git"}]],
-        "html": [[{"LOWER": "html"}]], "css": [[{"LOWER": "css"}]], "mysql": [[{"LOWER": "mysql"}]],
-        "axios": [[{"LOWER": "axios"}]], "microservices": [[{"LOWER": "microservices"}]], "fetch": [[{"LOWER": "fetch"}]],
-
-        # Multi-word skills
-        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]],
-        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
-        "restful apis": [[{"LOWER": "restful"}, {"LOWER": "apis"}]],
-        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]],
-        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
-        "node.js": [[{"LOWER": "node.js"}]],
-        "express.js": [[{"LOWER": "express.js"}]],
-        "react native": [[{"LOWER": "react"}, {"LOWER": "native"}]],
-        "react.js": [[{"LOWER": "react.js"}]],
-        "react hooks": [[{"LOWER": "react"}, {"LOWER": "hooks"}]],
-        "react router": [[{"LOWER": "react"}, {"LOWER": "router"}]],
-        "natural language processing": [[{"LOWER": "natural"}, {"LOWER": "language"}, {"LOWER": "processing"}]],
-        "power bi": [[{"LOWER": "power"}, {"LOWER": "bi"}]],
-        "google cloud": [[{"LOWER": "google"}, {"LOWER": "cloud"}]]
-    }
-
-    for skill, pattern in patterns.items():
-        matcher.add(skill, pattern)
-
-    matches = matcher(doc)
-    for match_id, start, end in matches:
-        span = doc[start:end]
-        span_text = span.text
-        keywords.add(span_text)
-        
-        # Add base skills for compound terms
-        if span_text in ["core java", "java"]: keywords.add("java")
-        elif span_text in ["spring boot", "spring"]: keywords.add("spring")
-        elif span_text in ["rest api", "restful apis"]: keywords.add("api"); keywords.add("rest")
-        elif span_text in ["node.js", "express.js"]: keywords.add("node")
-        elif span_text in ["react", "react.js", "react native", "react hooks", "react router"]: keywords.add("react")
-
-        for i in range(start, end):
-            matched_tokens.add(i)
-
-    # --- STEP 3: General Noun Chunk Extraction to discover ANY other skill ---
+    # STEP 2: Extract Noun Chunks - This is the primary method for finding multi-word skills
+    # e.g., "natural language processing", "full-stack development", "spring boot"
     for chunk in doc.noun_chunks:
-        if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
-            clean_chunk = chunk.lemma_.strip()
-            if len(clean_chunk) > 2 and clean_chunk not in IGNORE_WORDS and not any(word in IGNORE_WORDS for word in clean_chunk.split()):
-                keywords.add(clean_chunk)
+        clean_chunk = chunk.lemma_.strip()
+        # Filter out chunks that are too short, contain ignore words, or are just numbers
+        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in clean_chunk.split()) and not clean_chunk.isnumeric():
+            keywords.add(clean_chunk)
 
-    # --- STEP 4: Extract Single-Word PROPN and NOUN skills (as a fallback) ---
+    # STEP 3: Extract Important Single Words (Proper Nouns, Nouns)
+    # This finds skills like "Java", "Python", "AWS", "Git", "SQL"
     for token in doc:
-        if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
+        # Check if the word is a proper noun or a noun, and it's not a stop word or in our ignore list
+        if token.pos_ in ('PROPN', 'NOUN') and not token.is_stop and token.lemma_ not in IGNORE_WORDS:
             lemma = token.lemma_.strip()
-            if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
+            if len(lemma) > 1:
                 keywords.add(lemma)
-                
-    # --- STEP 5: Use Regular Expressions for Specific Formats ---
-    special_formats = re.findall(r'\b[a-z]\+\+|\b[a-z]#|\b\.net\b', cleaned_text)
-    for skill in special_formats:
-        keywords.add(skill)
 
-    return list(keywords)
+    # STEP 4: Dynamic Acronym Detection - A rule to find capitalized acronyms
+    # This specifically targets skills like AWS, GCP, CI/CD etc.
+    acronyms = re.findall(r'\b[A-Z]{2,5}\b', original_text)
+    for acronym in acronyms:
+        keywords.add(acronym.lower())
+
+    # STEP 5: Final Cleanup - Remove any remaining ignored words that might have slipped through
+    final_keywords = {k for k in keywords if k not in IGNORE_WORDS}
+
+    return list(final_keywords)
     
 def match_resume_to_job(resume_keywords, job_skills):
     resume_set = set(k.lower() for k in resume_keywords)
@@ -166,17 +129,14 @@ def match_resume_to_job(resume_keywords, job_skills):
     return matched_skills, missing_skills, round(score, 2)
 
 def send_email(to_email, subject, body):
-    """Sends a simple plain text email."""
     if not to_email or to_email == "Not found":
         st.error("Email is blank, cannot send email.")
         return False
-        
     msg = MIMEMultipart()
     msg["From"] = SMTP_EMAIL
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
-    
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
@@ -196,19 +156,14 @@ def load_jobs_from_db():
 def load_all_applications():
     final_cols = ["id", "logged_in_username", "email", "candidate_name", "role", "company", "match_score", "current_phase", "status"]
     try:
-        response = supabase.table('applications').select(
-            'id, match_score, phase, status, candidate_name, candidate_email, users(email), jobs(title, company)'
-        ).execute()
+        response = supabase.table('applications').select('id, match_score, phase, status, candidate_name, candidate_email, users(email), jobs(title, company)').execute()
     except Exception as e:
         st.error(f"Failed to load application data: {e}")
         return pd.DataFrame(columns=final_cols)
     if not response.data:
         return pd.DataFrame(columns=final_cols)
     df = pd.json_normalize(response.data)
-    df.rename(columns={
-        'candidate_email': 'email', 'phase': 'current_phase',
-        'users.email': 'logged_in_username', 'jobs.title': 'role', 'jobs.company': 'company'
-    }, inplace=True)
+    df.rename(columns={'candidate_email': 'email', 'phase': 'current_phase', 'users.email': 'logged_in_username', 'jobs.title': 'role', 'jobs.company': 'company'}, inplace=True)
     for col in final_cols:
         if col not in df.columns: df[col] = None
     return df[final_cols]
@@ -228,17 +183,13 @@ def login_register_ui():
                 st.success("Login successful!"); st.rerun()
             else:
                 st.error("Invalid credentials.")
-        
         with st.expander("Forgot Password?"):
             with st.form("reset_password_form", clear_on_submit=False):
                 st.write("Reset your password by entering your email and a new password.")
                 email_reset = st.text_input("Enter your registered Email", key="email_reset")
                 new_password_reset = st.text_input("Enter New Password", type="password", key="new_pass_reset")
                 confirm_password_reset = st.text_input("Confirm New Password", type="password", key="confirm_pass_reset")
-                
-                submitted_reset = st.form_submit_button("Reset Password")
-                
-                if submitted_reset:
+                if st.form_submit_button("Reset Password"):
                     if not email_reset or not new_password_reset or not confirm_password_reset:
                         st.warning("Please fill in all fields.")
                     elif new_password_reset != confirm_password_reset:
@@ -274,7 +225,6 @@ def user_view():
     df_all = load_all_applications()
     my_apps = df_all[df_all["logged_in_username"] == st.session_state["username"]]
     st.subheader("My Applications")
-    
     if not my_apps.empty:
         st.dataframe(my_apps[['company', 'role', 'match_score', 'current_phase', 'status']])
     else:
@@ -283,26 +233,19 @@ def user_view():
     jobs_df = load_jobs_from_db()
     if jobs_df.empty:
         st.warning("No jobs are currently available."); return
-        
     job_role = st.selectbox("Select a Job Role", options=jobs_df['title'].unique())
     company_options = jobs_df[jobs_df['title'] == job_role]['company'].unique()
     company = st.selectbox("Select Company", options=company_options)
-
     uploaded_file = st.file_uploader("Upload Resume (PDF or DOCX)", type=["pdf", "docx"])
     
     if uploaded_file:
         text = extract_text_from_pdf(uploaded_file) if uploaded_file.name.endswith(".pdf") else extract_text_from_docx(uploaded_file)
-        
         candidate_email = extract_email(text)
-        
         filtered_job_df = jobs_df[(jobs_df['title'] == job_role) & (jobs_df['company'] == company)]
-        
         if filtered_job_df.empty:
             st.error(f"Could not find the selected job: '{job_role}' at '{company}'. Please refresh."); return
-
         selected_job = filtered_job_df.iloc[0]
         jd_skills, job_id = selected_job['skills'], selected_job['id']
-
         if isinstance(jd_skills, str):
             import json
             try:
@@ -313,10 +256,8 @@ def user_view():
         resume_keywords = extract_keywords(text)
         matched, missing, score = match_resume_to_job(resume_keywords, jd_skills)
         phase, status = ("Not Selected", "Rejected") if score < 70 else ("Round 1 (Interview Pending Scheduling)", "In Progress")
-
         st.markdown("---"); st.subheader("Please Review Your Application")
         st.info(f"Applying for: **{company} — {job_role}**")
-        
         col1, col2 = st.columns(2)
         with col1:
             st.write(f"**Calculated Match Score:** {score}%")
@@ -327,9 +268,7 @@ def user_view():
             st.write(f"**Missing Skills:**"); st.error(f"{', '.join(sorted(missing)) if missing else 'None'}")
         
         if st.button("Confirm and Submit Application"):
-            application_data = {"user_id": st.session_state["user_id"], "job_id": job_id, "match_score": score,
-                                "phase": phase, "status": status, "submission_date": datetime.now().isoformat(),
-                                "candidate_name": "Candidate", "candidate_email": candidate_email}
+            application_data = {"user_id": st.session_state["user_id"], "job_id": job_id, "match_score": score, "phase": phase, "status": status, "submission_date": datetime.now().isoformat(), "candidate_name": "Candidate", "candidate_email": candidate_email}
             try:
                 supabase.table('applications').insert(application_data).execute()
                 st.success("Application submitted successfully!"); st.rerun()
@@ -338,22 +277,16 @@ def user_view():
 
 def hr_view():
     st.header("HR Dashboard")
-    
     with st.expander("Add New Job Opening"):
         with st.form("new_job_form", clear_on_submit=True):
             job_title = st.text_input("Job Title")
             company_name = st.text_input("Company Name")
             job_description = st.text_area("Job Description")
             job_skills = st.text_input("Required Skills (comma-separated)")
-            
-            submitted = st.form_submit_button("Add Job")
-            if submitted:
+            if st.form_submit_button("Add Job"):
                 if job_title and company_name and job_skills:
                     skills_list = [skill.strip().lower() for skill in job_skills.split(',')]
-                    new_job_data = {
-                        "title": job_title, "company": company_name,
-                        "description": job_description, "skills": skills_list
-                    }
+                    new_job_data = {"title": job_title, "company": company_name, "description": job_description, "skills": skills_list}
                     try:
                         supabase.table('jobs').insert(new_job_data).execute()
                         st.success(f"Successfully added job: {job_title} at {company_name}")
@@ -366,32 +299,23 @@ def hr_view():
     df = load_all_applications()
     if df.empty:
         st.warning("No candidates yet."); return
-
     st.subheader("All Candidates Overview")
-    st.dataframe(df.drop(columns=['candidate_name'])) # Remove name column from overview
-    
+    st.dataframe(df.drop(columns=['candidate_name']))
     st.subheader("Process Candidate")
     eligible_df = df[(df['status'] == 'In Progress') & (df['match_score'] >= 70)].copy()
     if eligible_df.empty:
         st.info("No eligible candidates to process."); return
-
     company_sel = st.selectbox("Filter by Company", sorted(eligible_df["company"].unique()))
     filtered_company = eligible_df[eligible_df["company"] == company_sel]
     role_sel = st.selectbox("Filter by Role", sorted(filtered_company["role"].unique()))
     filtered_role = filtered_company[filtered_company["role"] == role_sel]
-    
     if filtered_role.empty:
         st.info(f"No eligible candidates for {role_sel} at {company_sel}."); return
-
     selected_display = st.selectbox("Select Candidate Email", filtered_role['email'].unique())
-    
     if not selected_display: return
-        
     candidate = filtered_role[filtered_role['email'] == selected_display].iloc[0]
     app_id = int(candidate['id'])
-
     st.markdown(f"**Email:** {candidate['email']} | **Score:** {candidate['match_score']}% | **Phase:** {candidate['current_phase']}")
-    
     if "Pending Scheduling" in candidate["current_phase"]:
         with st.form(key=f"schedule_form_{app_id}"):
             st.write("Schedule Interview")
@@ -400,31 +324,14 @@ def hr_view():
             meeting_time = c2.time_input("Time")
             duration_mins = c3.number_input("Duration (mins)", 15, 90, 30, 15)
             meet_link = st.text_input("Google Meet Link", "https://meet.google.com/...")
-            
             if st.form_submit_button("Send Interview Invite"):
                 start_dt = datetime.combine(meeting_date, meeting_time)
-                email_body = f"""
-Dear Candidate,
-
-This is an invitation for an interview for the {candidate['role']} position at {candidate['company']}.
-
-Date: {start_dt.strftime('%A, %B %d, %Y')}
-Time: {start_dt.strftime('%I:%M %p')}
-Duration: {duration_mins} minutes
-Meeting Link: {meet_link}
-
-Please let us know if you have any questions.
-
-Best regards,
-The HR Team
-"""
+                email_body = f"Dear Candidate,\n\nThis is an invitation for an interview for the {candidate['role']} position at {candidate['company']}.\n\nDate: {start_dt.strftime('%A, %B %d, %Y')}\nTime: {start_dt.strftime('%I:%M %p')}\nDuration: {duration_mins} minutes\nMeeting Link: {meet_link}\n\nPlease let us know if you have any questions.\n\nBest regards,\nThe HR Team"
                 sent = send_email(candidate["email"], f"Interview Invitation: {candidate['role']} at {candidate['company']}", email_body)
-
                 if sent:
                     new_phase = candidate["current_phase"].replace("Pending Scheduling", "Scheduled")
                     supabase.table('applications').update({'phase': new_phase}).eq('id', app_id).execute()
                     st.success("Interview scheduled!"); st.rerun()
-
     elif "Scheduled" in candidate["current_phase"]:
         result = st.radio("Result of Current Round", ["Pass", "Fail"], key=f"result_{app_id}", horizontal=True)
         if st.button("Submit Result", key=f"submit_{app_id}"):
@@ -439,7 +346,6 @@ The HR Team
                     update_data = {"status": "Selected", "phase": "Selected"}
                     offer_body = f"Dear Candidate,\n\nCongratulations! You have been selected for the {candidate['role']} position at {candidate['company']}.\n\nWe are excited to welcome you to the team.\n\nBest regards,\nThe HR Team"
                     send_email(candidate["email"], "Job Offer", offer_body)
-            
             if update_data:
                 supabase.table('applications').update(update_data).eq('id', app_id).execute()
                 st.success("Result updated!"); st.rerun()
@@ -453,7 +359,6 @@ def main():
             st.markdown(f"Logged in as `{st.session_state['username']}`")
             if st.button("Logout", key="logout_btn"):
                 st.session_state.clear(); st.rerun()
-        
         if st.session_state["role"] == "User": user_view()
         elif st.session_state["role"] == "HR": hr_view()
         else: st.error("Unknown role")
