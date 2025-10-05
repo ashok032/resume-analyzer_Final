@@ -99,50 +99,78 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- FULLY DYNAMIC & AI-DRIVEN SKILL EXTRACTION ---
+# --- CORRECTED HYBRID SKILL EXTRACTION (FROM MIDTERM) ---
 def extract_keywords(text):
     """
-    Extracts potential skills using a dynamic NLP-only approach.
-    This version avoids a hardcoded dictionary to discover any skill mentioned.
+    Extracts skills using the proven hybrid approach for the best balance of precision and discovery.
     """
     original_text = text
     doc = nlp(text.lower())
+    matcher = Matcher(nlp.vocab)
     keywords = set()
+    matched_tokens = set()
 
-    # Expanded list of common non-skill words to improve accuracy by filtering noise
     IGNORE_WORDS = {
-        'experience', 'skill', 'skills', 'profile', 'summary', 'education',
-        'project', 'projects', 'internship', 'internships', 'work', 'role',
-        'contact', 'email', 'phone', 'address', 'linkedin', 'github', 'name',
-        'date', 'month', 'year', 'company', 'university', 'college', 'gpa',
-        'description', 'responsibility', 'responsibilities', 'objective', 'team',
-        'location', 'city', 'state', 'country', 'inc', 'ltd', 'llc', 'references',
-        'available', 'request', 'january', 'february', 'march', 'april', 'may',
-        'june', 'july', 'august', 'september', 'october', 'november', 'december'
+        'experience', 'skill', 'skills', 'profile', 'summary', 'education', 'project', 
+        'projects', 'internship', 'internships', 'work', 'role', 'contact', 'email', 
+        'phone', 'address', 'linkedin', 'github', 'name', 'date', 'month', 'year', 
+        'company', 'university', 'college', 'gpa', 'description', 'responsibility', 
+        'responsibilities', 'objective', 'team', 'inc', 'ltd'
     }
 
-    # --- Step 1: Extract skills from Noun Chunks ---
-    # Noun chunks are base noun phrases like "data visualization" or "machine learning models"
-    for chunk in doc.noun_chunks:
-        clean_chunk = chunk.lemma_.strip()
-        tokens_in_chunk = clean_chunk.split()
-        
-        # Filter out chunks that are too short or contain ignored words
-        if len(clean_chunk) > 2 and not any(word in IGNORE_WORDS for word in tokens_in_chunk):
-            keywords.add(clean_chunk)
+    # --- Step 1: High-Precision Matcher for common, unambiguous skills ---
+    # This guarantees the most important skills are always found correctly.
+    patterns = {
+        "java": [[{"LOWER": "java"}]],
+        "sql": [[{"LOWER": "sql"}]],
+        "python": [[{"LOWER": "python"}]],
+        "react": [[{"LOWER": "react"}]],
+        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], 
+        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
+        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], 
+        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
+        "microservices": [[{"LOWER": "microservices"}]], 
+        "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]]
+    }
 
-    # --- Step 2: Extract Single-Word PROPN and NOUN skills ---
-    # This catches single-word skills like "Java", "Python", "SQL", "Tableau"
+    for skill, pattern in patterns.items():
+        matcher.add(skill, pattern)
+
+    matches = matcher(doc)
+    for match_id, start, end in matches:
+        span = doc[start:end]
+        span_text = span.text
+        keywords.add(span_text)
+        
+        # Add base skills for compound terms
+        if span_text == "core java":
+            keywords.add("java")
+        elif span_text == "spring boot":
+            keywords.add("spring")
+        elif span_text == "rest api":
+            keywords.add("api")
+            keywords.add("rest")
+        elif span_text == "node.js":
+            keywords.add("node")
+
+        for i in range(start, end):
+            matched_tokens.add(i)
+
+    # --- Step 2: General Noun Chunk Extraction to discover ANY other skill ---
+    for chunk in doc.noun_chunks:
+        if chunk.start not in matched_tokens and chunk.end - 1 not in matched_tokens:
+            clean_chunk = chunk.lemma_.strip()
+            if len(clean_chunk) > 2 and clean_chunk not in IGNORE_WORDS and not any(word in IGNORE_WORDS for word in clean_chunk.split()):
+                keywords.add(clean_chunk)
+
+    # --- Step 3: Extract Single-Word PROPN and NOUN skills (as a fallback) ---
     for token in doc:
-        # Check if the token is a Proper Noun or a regular Noun
-        if token.pos_ in ('PROPN', 'NOUN'):
+        if token.i not in matched_tokens and token.pos_ in ('PROPN', 'NOUN'):
             lemma = token.lemma_.strip()
-            # Further filtering for single words to ensure relevance
             if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
                 
-    # --- Step 3: Use Regular Expressions for Specific Formats ---
-    # This helps catch skills written in special formats like "C++", ".NET", etc.
+    # --- Step 4: Use Regular Expressions for Specific Formats ---
     special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b', original_text)
     for skill in special_formats:
         keywords.add(skill.lower())
@@ -298,16 +326,15 @@ def user_view():
         selected_job = filtered_job_df.iloc[0]
         jd_skills, job_id = selected_job['skills'], selected_job['id']
 
-        # --- FIX FOR SKILLS DATA TYPE ---
+        # --- FIX FOR SKILLS DATA TYPE FROM DATABASE ---
         if isinstance(jd_skills, str):
             import json
             try:
-                # Attempt to parse it as JSON first
+                # Attempt to parse it as JSON first (handles lists like '["a", "b"]')
                 jd_skills = json.loads(jd_skills.replace("'", '"'))
             except json.JSONDecodeError:
                 # Fallback for simple comma-separated strings
-                jd_skills = [skill.strip() for skill in jd_skills.strip("[]").replace("'", "").replace('"', '').split(',')]
-
+                jd_skills = [skill.strip() for skill in jd_skills.strip("[]{}").replace("'", "").replace('"', '').split(',')]
         
         resume_keywords = extract_keywords(text)
         matched, missing, score = match_resume_to_job(resume_keywords, jd_skills)
