@@ -44,10 +44,10 @@ def hash_password(password):
 
 # --- ROBUST RESUME PARSING FUNCTIONS ---
 def extract_text_from_pdf(file):
-    """Extracts text from a PDF file."""
+    """Extracts text from a PDF file, attempting to preserve word order."""
     try:
         with pdfplumber.open(file) as pdf:
-            return "\n".join(page.extract_text() or '' for page in pdf.pages)
+            return "\n".join(page.extract_text(x_tolerance=2, y_tolerance=2) or '' for page in pdf.pages)
     except Exception as e:
         st.error(f"Error reading PDF file: {e}")
         return ""
@@ -66,25 +66,20 @@ def extract_email(text):
     match = re.search(r'[\w\.-]+@[\w\.-]+', text)
     return match.group(0) if match else "Not found"
 
-# --- DEFINITIVELY CORRECTED HYBRID SKILL EXTRACTION ---
+# --- DEFINITIVELY CORRECTED & EXPANDED HYBRID SKILL EXTRACTION ---
 def extract_keywords(text):
     """
-    Extracts skills using the proven hybrid approach for the best balance of precision and discovery.
+    Extracts skills using a robust hybrid approach for the best balance of precision and discovery.
     """
     original_text = text
     
     # --- STEP 1: Pre-process the text thoroughly ---
-    # Convert to lowercase FIRST to ensure case-insensitive cleaning and matching.
     lower_text = original_text.lower()
+    text_single_line = re.sub(r'[\n\r]', ' ', lower_text)
+    cleaned_text = re.sub(r'[(),|]', ' ', text_single_line)
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
-    # Clean text to handle punctuation AND newlines that can separate skill words.
-    # This turns "(spring\nboot)" or "spring boot," into "spring boot ".
-    cleaned_text = re.sub(r'[(),|\n\r]', ' ', lower_text)
-    
-    # Collapse multiple spaces into one to normalize whitespace.
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
-    
-    doc = nlp(cleaned_text) # Process the final, clean text
+    doc = nlp(cleaned_text)
     matcher = Matcher(nlp.vocab)
     keywords = set()
     matched_tokens = set()
@@ -94,16 +89,32 @@ def extract_keywords(text):
         'projects', 'internship', 'internships', 'work', 'role', 'contact', 'email', 
         'phone', 'address', 'linkedin', 'github', 'name', 'date', 'month', 'year', 
         'company', 'university', 'college', 'gpa', 'description', 'responsibility', 
-        'responsibilities', 'objective', 'team', 'inc', 'ltd'
+        'responsibilities', 'objective', 'team', 'inc', 'ltd', 'website', 'client'
     }
 
-    # --- STEP 2: High-Precision Matcher for common, unambiguous skills ---
+    # --- STEP 2: Greatly Expanded High-Precision Matcher ---
     patterns = {
+        # Single-word skills
         "java": [[{"LOWER": "java"}]], "sql": [[{"LOWER": "sql"}]], "python": [[{"LOWER": "python"}]],
-        "react": [[{"LOWER": "react"}]], "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]], 
-        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]], "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]], 
-        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]], "microservices": [[{"LOWER": "microservices"}]], 
-        "node.js": [[{"LOWER": "node"}, {"IS_PUNCT": True}, {"LOWER": "js"}]]
+        "react": [[{"LOWER": "react"}]], "redux": [[{"LOWER": "redux"}]], "git": [[{"LOWER": "git"}]],
+        "html": [[{"LOWER": "html"}]], "css": [[{"LOWER": "css"}]], "mysql": [[{"LOWER": "mysql"}]],
+        "axios": [[{"LOWER": "axios"}]], "microservices": [[{"LOWER": "microservices"}]], "fetch": [[{"LOWER": "fetch"}]],
+
+        # Multi-word skills
+        "spring boot": [[{"LOWER": "spring"}, {"LOWER": "boot"}]],
+        "rest api": [[{"LOWER": "rest"}, {"LOWER": "api"}]],
+        "restful apis": [[{"LOWER": "restful"}, {"LOWER": "apis"}]],
+        "machine learning": [[{"LOWER": "machine"}, {"LOWER": "learning"}]],
+        "core java": [[{"LOWER": "core"}, {"LOWER": "java"}]],
+        "node.js": [[{"LOWER": "node.js"}]],
+        "express.js": [[{"LOWER": "express.js"}]],
+        "react native": [[{"LOWER": "react"}, {"LOWER": "native"}]],
+        "react.js": [[{"LOWER": "react.js"}]],
+        "react hooks": [[{"LOWER": "react"}, {"LOWER": "hooks"}]],
+        "react router": [[{"LOWER": "react"}, {"LOWER": "router"}]],
+        "natural language processing": [[{"LOWER": "natural"}, {"LOWER": "language"}, {"LOWER": "processing"}]],
+        "power bi": [[{"LOWER": "power"}, {"LOWER": "bi"}]],
+        "google cloud": [[{"LOWER": "google"}, {"LOWER": "cloud"}]]
     }
 
     for skill, pattern in patterns.items():
@@ -115,10 +126,12 @@ def extract_keywords(text):
         span_text = span.text
         keywords.add(span_text)
         
-        if span_text == "core java": keywords.add("java")
-        elif span_text == "spring boot": keywords.add("spring")
-        elif span_text == "rest api": keywords.add("api"); keywords.add("rest")
-        elif span_text == "node.js": keywords.add("node")
+        # Add base skills for compound terms
+        if span_text in ["core java", "java"]: keywords.add("java")
+        elif span_text in ["spring boot", "spring"]: keywords.add("spring")
+        elif span_text in ["rest api", "restful apis"]: keywords.add("api"); keywords.add("rest")
+        elif span_text in ["node.js", "express.js"]: keywords.add("node")
+        elif span_text in ["react", "react.js", "react native", "react hooks", "react router"]: keywords.add("react")
 
         for i in range(start, end):
             matched_tokens.add(i)
@@ -137,10 +150,10 @@ def extract_keywords(text):
             if len(lemma) > 1 and not token.is_stop and lemma not in IGNORE_WORDS:
                 keywords.add(lemma)
                 
-    # --- STEP 5: Use Regular Expressions for Specific Formats (run on original text for case) ---
-    special_formats = re.findall(r'\b[A-Z]\+\+|\b[A-Z]#|\b\.NET\b', original_text)
+    # --- STEP 5: Use Regular Expressions for Specific Formats ---
+    special_formats = re.findall(r'\b[a-z]\+\+|\b[a-z]#|\b\.net\b', cleaned_text)
     for skill in special_formats:
-        keywords.add(skill.lower())
+        keywords.add(skill)
 
     return list(keywords)
     
@@ -175,7 +188,6 @@ def send_email(to_email, subject, body):
         return False
 
 # -------------------- Supabase Data Functions --------------------
-
 @st.cache_data(ttl=600)
 def load_jobs_from_db():
     response = supabase.table('jobs').select('id, title, company, skills, description').execute()
@@ -202,7 +214,6 @@ def load_all_applications():
     return df[final_cols]
 
 # -------------------- UI & Logic --------------------
-
 def login_register_ui():
     st.title("AI Resume Analyzer")
     tabs = st.tabs(["Login", "Register"])
@@ -372,7 +383,6 @@ def hr_view():
     if filtered_role.empty:
         st.info(f"No eligible candidates for {role_sel} at {company_sel}."); return
 
-    # Use email as the display identifier
     selected_display = st.selectbox("Select Candidate Email", filtered_role['email'].unique())
     
     if not selected_display: return
@@ -388,12 +398,11 @@ def hr_view():
             c1, c2, c3 = st.columns(3)
             meeting_date = c1.date_input("Date")
             meeting_time = c2.time_input("Time")
-            duration_mins = c3.number_input("Duration (mins)", 15, 240, 30, 15)
+            duration_mins = c3.number_input("Duration (mins)", 15, 90, 30, 15)
             meet_link = st.text_input("Google Meet Link", "https://meet.google.com/...")
             
             if st.form_submit_button("Send Interview Invite"):
                 start_dt = datetime.combine(meeting_date, meeting_time)
-                # Use generic salutation
                 email_body = f"""
 Dear Candidate,
 
@@ -428,7 +437,6 @@ The HR Team
                 elif "Round 2" in current_phase: update_data = {"phase": "Final (Interview Pending Scheduling)"}
                 elif "Final" in current_phase:
                     update_data = {"status": "Selected", "phase": "Selected"}
-                    # Use generic salutation
                     offer_body = f"Dear Candidate,\n\nCongratulations! You have been selected for the {candidate['role']} position at {candidate['company']}.\n\nWe are excited to welcome you to the team.\n\nBest regards,\nThe HR Team"
                     send_email(candidate["email"], "Job Offer", offer_body)
             
